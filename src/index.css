@@ -1,0 +1,19 @@
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+button:focus-visible,
+label:focus-within {
+  outline: 2px solid #1F5C54;
+  outline-offset: 2px;
+}

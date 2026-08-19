@@ -35,13 +35,9 @@ const WEEKDAYS = [
 
 const OSS_STAGES = ["Not started", "Exploring", "Applied", "Accepted", "Contributing", "PR merged"];
 
-const TREE_STAGES = [
-  "🌰", // seed
-  "🌱", // sprout
-  "🌿", // small shoot
-  "🌴", // young palm
-  "🌴🥥", // palm with coconuts
-];
+const TREE_STAGES = ["🌰", "🌱", "🌿", "🌴", "🌴🥥"];
+
+const STORAGE_KEY = "fintech-tracker-state-v1";
 
 function getWeekKey(d = new Date()) {
   const onejan = new Date(d.getFullYear(), 0, 1);
@@ -59,6 +55,25 @@ const DEFAULT_STATE = {
   cse: { modulesDone: 0, modulesTotal: 12 },
   totalChecks: 0,
 };
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_STATE;
+    return { ...DEFAULT_STATE, ...JSON.parse(raw) };
+  } catch (e) {
+    console.warn("Could not load saved progress, starting fresh.", e);
+    return DEFAULT_STATE;
+  }
+}
+
+function saveState(state) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("Could not save progress.", e);
+  }
+}
 
 // ---------- small components ----------
 
@@ -85,9 +100,7 @@ function SectionCard({ title, subtitle, children }) {
         >
           {title}
         </h2>
-        {subtitle && (
-          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#7A7060" }}>{subtitle}</p>
-        )}
+        {subtitle && <p style={{ margin: "4px 0 0", fontSize: 13, color: "#7A7060" }}>{subtitle}</p>}
       </div>
       {children}
     </div>
@@ -95,8 +108,12 @@ function SectionCard({ title, subtitle, children }) {
 }
 
 function Tree({ count }) {
-  const stageIdx = Math.min(TREE_STAGES.length - 1, Math.floor(count / 8));
-  const nextAt = (stageIdx + 1) * 8;
+  const perStage = 8;
+  const stageIdx = Math.min(TREE_STAGES.length - 1, Math.floor(count / perStage));
+  const nextAt = (stageIdx + 1) * perStage;
+  const isMaxStage = stageIdx === TREE_STAGES.length - 1;
+  const pct = isMaxStage ? 100 : Math.min(100, ((count % perStage) / perStage) * 100);
+
   return (
     <div
       style={{
@@ -114,27 +131,11 @@ function Tree({ count }) {
         <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 4 }}>
           {count} habit checks logged · growing your coconut tree
         </div>
-        <div
-          style={{
-            height: 8,
-            background: "rgba(255,255,255,0.25)",
-            borderRadius: 6,
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              height: "100%",
-              width: `${Math.min(100, (count / (stageIdx === TREE_STAGES.length - 1 ? nextAt : nextAt)) * 100)}%`,
-              background: TOKENS.gold,
-              transition: "width 0.4s ease",
-            }}
-          />
+        <div style={{ height: 8, background: "rgba(255,255,255,0.25)", borderRadius: 6, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${pct}%`, background: TOKENS.gold, transition: "width 0.4s ease" }} />
         </div>
         <div style={{ fontSize: 11, opacity: 0.75, marginTop: 4 }}>
-          {stageIdx === TREE_STAGES.length - 1
-            ? "Fully grown — full coconut tree. Keep the streak going."
-            : `${nextAt - count} more checks to the next stage`}
+          {isMaxStage ? "Fully grown — full coconut tree. Keep the streak going." : `${nextAt - count} more checks to the next stage`}
         </div>
       </div>
     </div>
@@ -172,45 +173,41 @@ function Checkbox({ checked, onChange, label }) {
       >
         {checked && <span style={{ color: "#fff", fontSize: 12 }}>✓</span>}
       </div>
-      <span style={{ fontSize: 14, color: TOKENS.ink, textDecoration: checked ? "line-through" : "none", opacity: checked ? 0.6 : 1 }}>
+      <span
+        style={{
+          fontSize: 14,
+          color: TOKENS.ink,
+          textDecoration: checked ? "line-through" : "none",
+          opacity: checked ? 0.6 : 1,
+        }}
+      >
         {label}
       </span>
     </label>
   );
 }
 
+const miniBtn = {
+  width: 28,
+  height: 28,
+  borderRadius: 8,
+  border: `1px solid ${TOKENS.line}`,
+  background: "#fff",
+  fontSize: 16,
+  fontWeight: 600,
+  cursor: "pointer",
+  color: TOKENS.ink,
+};
+
 // ---------- main app ----------
 
 export default function App() {
-  const [state, setState] = useState(DEFAULT_STATE);
-  const [loaded, setLoaded] = useState(false);
+  const [state, setState] = useState(loadState);
   const weekKey = getWeekKey();
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await window.storage.get("fintech-tracker-state");
-        if (res && res.value) {
-          setState({ ...DEFAULT_STATE, ...JSON.parse(res.value) });
-        }
-      } catch (e) {
-        // no saved state yet
-      } finally {
-        setLoaded(true);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!loaded) return;
-    (async () => {
-      try {
-        await window.storage.set("fintech-tracker-state", JSON.stringify(state));
-      } catch (e) {
-        console.error("save failed", e);
-      }
-    })();
-  }, [state, loaded]);
+    saveState(state);
+  }, [state]);
 
   const thisWeek = state.weeks[weekKey] || {};
 
@@ -228,20 +225,22 @@ export default function App() {
   }
 
   function cycleOssStage(idx) {
-    setState((prev) => {
-      const oss = prev.oss.map((o, i) =>
-        i === idx ? { ...o, stage: (o.stage + 1) % OSS_STAGES.length } : o
-      );
-      return { ...prev, oss };
-    });
+    setState((prev) => ({
+      ...prev,
+      oss: prev.oss.map((o, i) => (i === idx ? { ...o, stage: (o.stage + 1) % OSS_STAGES.length } : o)),
+    }));
   }
 
   function bumpIeltsSessions(delta) {
-    setState((prev) => ({
-      ...prev,
-      ielts: { ...prev.ielts, sessions: Math.max(0, prev.ielts.sessions + delta) },
-      totalChecks: prev.totalChecks + (delta > 0 ? 1 : -1 < 0 && prev.ielts.sessions > 0 ? -1 : 0),
-    }));
+    setState((prev) => {
+      const nextSessions = Math.max(0, prev.ielts.sessions + delta);
+      const actualDelta = nextSessions - prev.ielts.sessions;
+      return {
+        ...prev,
+        ielts: { ...prev.ielts, sessions: nextSessions },
+        totalChecks: prev.totalChecks + actualDelta,
+      };
+    });
   }
 
   function toggleIeltsSat() {
@@ -249,19 +248,21 @@ export default function App() {
   }
 
   function bumpCse(delta) {
-    setState((prev) => ({
-      ...prev,
-      cse: {
-        ...prev.cse,
-        modulesDone: Math.max(0, Math.min(prev.cse.modulesTotal, prev.cse.modulesDone + delta)),
-      },
-      totalChecks: prev.totalChecks + (delta > 0 ? 1 : 0),
-    }));
+    setState((prev) => {
+      const nextDone = Math.max(0, Math.min(prev.cse.modulesTotal, prev.cse.modulesDone + delta));
+      const actualDelta = nextDone - prev.cse.modulesDone;
+      return {
+        ...prev,
+        cse: { ...prev.cse, modulesDone: nextDone },
+        totalChecks: prev.totalChecks + actualDelta,
+      };
+    });
   }
 
   function resetAll() {
-    if (window.confirm && !window.confirm("Reset all tracked progress? This can't be undone.")) return;
-    setState(DEFAULT_STATE);
+    if (window.confirm("Reset all tracked progress? This can't be undone.")) {
+      setState(DEFAULT_STATE);
+    }
   }
 
   const weekDone = WEEKDAYS.filter((d) => thisWeek[d.key]).length;
@@ -271,18 +272,23 @@ export default function App() {
       style={{
         fontFamily: "'Inter', system-ui, sans-serif",
         background: TOKENS.sand,
-        minHeight: "100%",
+        minHeight: "100vh",
         padding: "24px 18px",
         color: TOKENS.ink,
       }}
     >
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
-      `}</style>
-
       <div style={{ maxWidth: 640, margin: "0 auto" }}>
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 12, letterSpacing: 1.5, textTransform: "uppercase", color: TOKENS.coral, fontWeight: 600, marginBottom: 4 }}>
+          <div
+            style={{
+              fontSize: 12,
+              letterSpacing: 1.5,
+              textTransform: "uppercase",
+              color: TOKENS.coral,
+              fontWeight: 600,
+              marginBottom: 4,
+            }}
+          >
             FinTech Career Plan
           </div>
           <h1
@@ -297,7 +303,8 @@ export default function App() {
             Progress Tracker
           </h1>
           <p style={{ fontSize: 13, color: "#7A7060", margin: "6px 0 0" }}>
-            Week {weekKey.split("-W")[1]}, {weekKey.split("-")[0]} · Priority order runs top to bottom — protect the top of the list first.
+            Week {weekKey.split("-W")[1]}, {weekKey.split("-")[0]} · Priority order runs top to bottom — protect the
+            top of the list first.
           </p>
         </div>
 
@@ -343,14 +350,12 @@ export default function App() {
           ))}
         </SectionCard>
 
-        <SectionCard title="This Week's Weekday Habit" subtitle={`${weekDone}/5 days done · 45–60 min hard stop each day`}>
+        <SectionCard
+          title="This Week's Weekday Habit"
+          subtitle={`${weekDone}/5 days done · 45–60 min hard stop each day`}
+        >
           {WEEKDAYS.map((d) => (
-            <Checkbox
-              key={d.key}
-              checked={!!thisWeek[d.key]}
-              onChange={() => toggleDay(d.key)}
-              label={`${d.label} — ${d.task}`}
-            />
+            <Checkbox key={d.key} checked={!!thisWeek[d.key]} onChange={() => toggleDay(d.key)} label={`${d.label} — ${d.task}`} />
           ))}
         </SectionCard>
 
@@ -397,10 +402,7 @@ export default function App() {
           </div>
         </SectionCard>
 
-        <SectionCard
-          title="IELTS / English"
-          subtitle="High priority, not a mandatory trophy — okay if the score lands a bit under target."
-        >
+        <SectionCard title="IELTS / English" subtitle="High priority, not a mandatory trophy — okay if the score lands a bit under target.">
           <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 140px", background: "#FBF6EA", borderRadius: 10, padding: "10px 12px", border: `1px solid ${TOKENS.line}` }}>
               <div style={{ fontSize: 11, color: "#9A8F73" }}>Target band</div>
@@ -455,19 +457,11 @@ export default function App() {
             Reset all progress
           </button>
         </div>
+
+        <div style={{ textAlign: "center", marginTop: 16, fontSize: 11, color: "#B0A585" }}>
+          Progress is saved locally in this browser only.
+        </div>
       </div>
     </div>
   );
 }
-
-const miniBtn = {
-  width: 28,
-  height: 28,
-  borderRadius: 8,
-  border: `1px solid ${TOKENS.line}`,
-  background: "#fff",
-  fontSize: 16,
-  fontWeight: 600,
-  cursor: "pointer",
-  color: TOKENS.ink,
-};
